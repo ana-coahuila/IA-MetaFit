@@ -8,18 +8,20 @@ import os
 
 app = Flask(__name__)
 
+# Configuración MongoDB
 MONGO_URI = os.environ.get("MONGO_URL")
-PORT = int(os.environ.get("PORT", 8000))
-
-if not MONGO_URI:
-    raise ValueError("❌ Debes definir MONGO_URL en tu entorno")
 
 try:
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    db = client["fitness_db"]
-    print("MongoDB conectado")
+    if MONGO_URI:
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        db = client["fitness_db"]
+        print("✅ MongoDB conectado")
+    else:
+        print("⚠️ MONGO_URL no definida")
+        client = None
+        db = None
 except Exception as e:
-    print(f"Error MongoDB: {e}")
+    print(f"❌ Error MongoDB: {e}")
     client = None
     db = None
 
@@ -104,13 +106,13 @@ def adapt_plan():
     if event_type not in EVENT_IMPACT:
         return jsonify({"error": f"Evento '{event_type}' no reconocido"}), 400
 
+    # ✅ CORREGIDO: No buscar usuario en MongoDB, solo usar el ID para registrar el evento
     try:
-        user_data = db.users.find_one({"_id": ObjectId(user_id)})
+        # Solo verificar que el ID tenga formato válido, pero no buscar el usuario
+        if not ObjectId.is_valid(user_id):
+            return jsonify({"error": f"ID de usuario '{user_id}' no válido"}), 400
     except:
         return jsonify({"error": f"ID de usuario '{user_id}' no válido"}), 400
-
-    if not user_data:
-        return jsonify({"error": f"Usuario con ID '{user_id}' no encontrado"}), 404
 
     event = EVENT_IMPACT[event_type]
     tipo = event["tipo"]
@@ -135,6 +137,7 @@ def adapt_plan():
             )
             updated_plan[day_to_adjust] = new_meals
 
+    # Registrar el evento sin verificar si el usuario existe
     db.user_events.insert_one({
         "userId": user_id,
         "event": event_type,
@@ -148,5 +151,6 @@ def adapt_plan():
     })
 
 if __name__ == "__main__":
-    print(f"🚀 Servidor iniciado en puerto {PORT}")
-    app.run(host="0.0.0.0", port=PORT, debug=False)
+    port = int(os.environ.get("PORT", 8000))
+    print(f"🚀 Servidor iniciado en puerto {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
