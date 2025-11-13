@@ -8,25 +8,21 @@ import os
 
 app = Flask(__name__)
 
-# Configuración de MongoDB para Railway
-def get_mongo_connection():
-    mongo_uri = os.environ.get('MONGO_URL') or \
-                os.environ.get('MONGODB_URI') or \
-                os.environ.get('DATABASE_URL') or \
-                'mongodb://localhost:27017'
-    
-    try:
-        client = MongoClient(mongo_uri)
-        client.admin.command('ping')
-        db = client["fitness_db"]
-        print("✅ Conectado a MongoDB en Railway")
-        return db
-    except Exception as e:
-        print(f"❌ Error conectando a MongoDB: {e}")
-        print(f"URI usada: {mongo_uri[:20]}...")  
-        return None
+# Configuración MongoDB - EXACTAMENTE COMO TU OTRO CÓDIGO
+MONGO_URI = os.environ.get("MONGO_URL")
+PORT = int(os.environ.get("PORT", 8000))
 
-db = get_mongo_connection()
+if not MONGO_URI:
+    raise ValueError("❌ Debes definir MONGO_URL en tu entorno")
+
+try:
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    db = client["fitness_db"]
+    print("✅ MongoDB conectado")
+except Exception as e:
+    print(f"❌ Error MongoDB: {e}")
+    client = None
+    db = None
 
 EVENT_IMPACT = {
     "fiesta": {"calorias": 600, "compensar_dias": 3, "tipo": "exceso"},
@@ -93,7 +89,7 @@ def health():
 @app.route('/adapt', methods=['POST'])
 def adapt_plan():
     if db is None:
-        return jsonify({"error": "Base de datos no disponible. Por favor, verifica la conexión a MongoDB."}), 500
+        return jsonify({"error": "Base de datos no disponible"}), 500
         
     data = request.get_json()
     if not data:
@@ -152,12 +148,6 @@ def adapt_plan():
         "updatedPlan": updated_plan
     })
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port, debug=False)
-
-
-# -------------------------------
-# Procfile (para producción Railway)
-# -------------------------------
-# web: gunicorn app:app
+if __name__ == "__main__":
+    print(f"🚀 Servidor iniciado en puerto {PORT}")
+    app.run(host="0.0.0.0", port=PORT, debug=False)
