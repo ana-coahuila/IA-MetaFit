@@ -8,22 +8,27 @@ import os
 
 app = Flask(__name__)
 
-# Configuración MongoDB
+# Configuración MongoDB - EXACTA A TU OTRO CÓDIGO
 MONGO_URI = os.environ.get("MONGO_URL")
+MONGO_DB = os.environ.get("MONGO_DB", "fitness_db")
+PORT = int(os.environ.get("PORT", 8000))
 
-# Inicializar variables
-client = None
-db = None
+if not MONGO_URI:
+    raise ValueError("❌ Debes definir la variable MONGO_URL en tu entorno")
 
+# ------------------------------
+# Conexión a MongoDB
+# ------------------------------
 try:
-    if MONGO_URI:
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        db = client["fitness_db"]
-        print("✅ MongoDB conectado")
-    else:
-        print("⚠️ MONGO_URL no definida - Modo sin base de datos")
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    db = client[MONGO_DB]
+    users_col = db["users"]
+    user_events_col = db["user_events"]
+    print("✅ MongoDB conectado")
 except Exception as e:
     print(f"❌ Error MongoDB: {e}")
+    client = None
+    db = None
 
 EVENT_IMPACT = {
     "fiesta": {"calorias": 600, "compensar_dias": 3, "tipo": "exceso"},
@@ -59,7 +64,7 @@ def train_model():
         return None
         
     try:
-        events = list(db.user_events.find({}))
+        events = list(user_events_col.find({}))
         if len(events) < 3:
             return None
         
@@ -143,7 +148,7 @@ def adapt_plan():
 
         # Registrar evento si hay conexión a BD
         if db is not None:
-            db.user_events.insert_one({
+            user_events_col.insert_one({
                 "userId": user_id,
                 "event": event_type,
                 "day": day,
@@ -160,6 +165,5 @@ def adapt_plan():
         return jsonify({"error": "Error interno del servidor"}), 500
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    print(f"🚀 Servidor iniciado en puerto {port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    print(f"🚀 Servidor iniciado en puerto {PORT}")
+    app.run(host="0.0.0.0", port=PORT, debug=False)
