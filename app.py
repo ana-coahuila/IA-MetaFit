@@ -11,19 +11,19 @@ app = Flask(__name__)
 # Configuración MongoDB
 MONGO_URI = os.environ.get("MONGO_URL")
 
+# Inicializar variables
+client = None
+db = None
+
 try:
     if MONGO_URI:
         client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
         db = client["fitness_db"]
         print("✅ MongoDB conectado")
     else:
-        print("⚠️ MONGO_URL no definida")
-        client = None
-        db = None
+        print("⚠️ MONGO_URL no definida - Modo sin base de datos")
 except Exception as e:
     print(f"❌ Error MongoDB: {e}")
-    client = None
-    db = None
 
 EVENT_IMPACT = {
     "fiesta": {"calorias": 600, "compensar_dias": 3, "tipo": "exceso"},
@@ -58,22 +58,29 @@ def train_model():
     if db is None:
         return None
         
-    events = list(db.user_events.find({}))
-    if len(events) < 3:
+    try:
+        events = list(db.user_events.find({}))
+        if len(events) < 3:
+            return None
+        
+        X, y = [], []
+        for e in events:
+            tipo_evento = e.get("event", "")
+            if tipo_evento in EVENT_IMPACT:
+                calorias = EVENT_IMPACT[tipo_evento]["calorias"]
+                compensar = e.get("adjusted_days", EVENT_IMPACT[tipo_evento]["compensar_dias"])
+                X.append([calorias])
+                y.append(compensar)
+        
+        if len(X) < 3:
+            return None
+        
+        model = LinearRegression()
+        model.fit(X, y)
+        return model
+    except Exception as e:
+        print(f"❌ Error entrenando modelo: {e}")
         return None
-    X, y = [], []
-    for e in events:
-        tipo_evento = e.get("event", "")
-        if tipo_evento in EVENT_IMPACT:
-            calorias = EVENT_IMPACT[tipo_evento]["calorias"]
-            compensar = e.get("adjusted_days", EVENT_IMPACT[tipo_evento]["compensar_dias"])
-            X.append([calorias])
-            y.append(compensar)
-    if len(X) < 3:
-        return None
-    model = LinearRegression()
-    model.fit(X, y)
-    return model
 
 @app.route('/')
 def home():
@@ -89,66 +96,68 @@ def health():
 
 @app.route('/adapt', methods=['POST'])
 def adapt_plan():
-    if db is None:
-        return jsonify({"error": "Base de datos no disponible"}), 500
-        
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "Falta el cuerpo JSON"}), 400
-
-    user_id = data.get("userId")
-    event_type = data.get("eventType", "").lower()
-    day = data.get("day", "").lower()
-    plan = data.get("plan")
-
-    if not user_id or not plan:
-        return jsonify({"error": "Faltan campos obligatorios: userId y plan"}), 400
-    if event_type not in EVENT_IMPACT:
-        return jsonify({"error": f"Evento '{event_type}' no reconocido"}), 400
-
-    # ✅ CORREGIDO: No buscar usuario en MongoDB, solo usar el ID para registrar el evento
     try:
-        # Solo verificar que el ID tenga formato válido, pero no buscar el usuario
-        if not ObjectId.is_valid(user_id):
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Falta el cuerpo JSON"}), 400
+
+        user_id = data.get("userId")
+        event_type = data.get("eventType", "").lower()
+        day = data.get("day", "").lower()
+        plan = data.get("plan")
+
+        if not user_id or not plan:
+            return jsonify({"error": "Faltan campos obligatorios: userId y plan"}), 400
+        
+        if event_type not in EVENT_IMPACT:
+            return jsonify({"error": f"Evento '{event_type}' no reconocido"}), 400
+
+        # Solo validar formato del ID, no buscar en base de datos
+        try:
+            ObjectId(user_id)
+        except:
             return jsonify({"error": f"ID de usuario '{user_id}' no válido"}), 400
-    except:
-        return jsonify({"error": f"ID de usuario '{user_id}' no válido"}), 400
 
-    event = EVENT_IMPACT[event_type]
-    tipo = event["tipo"]
-    calorias_evento = event["calorias"]
+        event = EVENT_IMPACT[event_type]
+        tipo = event["tipo"]
+        calorias_evento = event["calorias"]
 
-    model = train_model()
-    compensar_dias = int(round(model.predict([[calorias_evento]])[0])) if model else event["compensar_dias"]
+        model = train_model()
+        compensar_dias = int(round(model.predict([[calorias_evento]])[0])) if model else event["compensar_dias"]
 
-    week_days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
-    event_index = week_days.index(day) if day in week_days else 0
+        week_days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
+        event_index = week_days.index(day) if day in week_days else 0
 
-    updated_plan = plan.copy()
-    for i in range(1, compensar_dias + 1):
-        idx = (event_index + i) % len(week_days)
-        day_to_adjust = week_days[idx]
-        if day_to_adjust in updated_plan:
-            new_meals = random.choices(
-                COMPENSATION_MEALS["ligero"] if "exceso" in tipo else
-                COMPENSATION_MEALS["proteico"] if "deficit" in tipo else
-                COMPENSATION_MEALS["detox"],
-                k=3
-            )
-            updated_plan[day_to_adjust] = new_meals
+        updated_plan = plan.copy()
+        for i in range(1, compensar_dias + 1):
+            idx = (event_index + i) % len(week_days)
+            day_to_adjust = week_days[idx]
+            if day_to_adjust in updated_plan:
+                new_meals = random.choices(
+                    COMPENSATION_MEALS["ligero"] if "exceso" in tipo else
+                    COMPENSATION_MEALS["proteico"] if "deficit" in tipo else
+                    COMPENSATION_MEALS["detox"],
+                    k=3
+                )
+                updated_plan[day_to_adjust] = new_meals
 
-    # Registrar el evento sin verificar si el usuario existe
-    db.user_events.insert_one({
-        "userId": user_id,
-        "event": event_type,
-        "day": day,
-        "adjusted_days": compensar_dias
-    })
+        # Registrar evento si hay conexión a BD
+        if db is not None:
+            db.user_events.insert_one({
+                "userId": user_id,
+                "event": event_type,
+                "day": day,
+                "adjusted_days": compensar_dias
+            })
 
-    return jsonify({
-        "message": f"Plan ajustado automáticamente por evento '{event_type}' (predicción ML: {compensar_dias} días)",
-        "updatedPlan": updated_plan
-    })
+        return jsonify({
+            "message": f"Plan ajustado automáticamente por evento '{event_type}' (predicción ML: {compensar_dias} días)",
+            "updatedPlan": updated_plan
+        })
+
+    except Exception as e:
+        print(f"❌ Error en adapt_plan: {e}")
+        return jsonify({"error": "Error interno del servidor"}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
