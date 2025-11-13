@@ -25,7 +25,7 @@ def get_mongo_connection():
         return db
     except Exception as e:
         print(f"❌ Error conectando a MongoDB: {e}")
-        print(f"URI usada: {mongo_uri[:20]}...")  # Log parcial por seguridad
+        print(f"URI usada: {mongo_uri[:20]}...")  
         return None
 
 # Inicializar la conexión
