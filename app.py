@@ -8,7 +8,6 @@ import os
 
 app = Flask(__name__)
 
-# Configuración MongoDB - EXACTAMENTE COMO TU OTRO CÓDIGO
 MONGO_URI = os.environ.get("MONGO_URL")
 PORT = int(os.environ.get("PORT", 8000))
 
@@ -18,9 +17,9 @@ if not MONGO_URI:
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     db = client["fitness_db"]
-    print("✅ MongoDB conectado")
+    print("MongoDB conectado")
 except Exception as e:
-    print(f"❌ Error MongoDB: {e}")
+    print(f"Error MongoDB: {e}")
     client = None
     db = None
 
