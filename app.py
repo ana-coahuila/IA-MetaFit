@@ -10,7 +10,6 @@ app = Flask(__name__)
 
 # Configuración de MongoDB para Railway
 def get_mongo_connection():
-    # Railway usa MONGO_URL, pero también probamos otras variables comunes
     mongo_uri = os.environ.get('MONGO_URL') or \
                 os.environ.get('MONGODB_URI') or \
                 os.environ.get('DATABASE_URL') or \
@@ -18,17 +17,15 @@ def get_mongo_connection():
     
     try:
         client = MongoClient(mongo_uri)
-        # Verificar la conexión
         client.admin.command('ping')
         db = client["fitness_db"]
-        print("Conectado a MongoDB en Railway")
+        print("✅ Conectado a MongoDB en Railway")
         return db
     except Exception as e:
         print(f"❌ Error conectando a MongoDB: {e}")
         print(f"URI usada: {mongo_uri[:20]}...")  
         return None
 
-# Inicializar la conexión
 db = get_mongo_connection()
 
 EVENT_IMPACT = {
@@ -158,3 +155,9 @@ def adapt_plan():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
+
+# -------------------------------
+# Procfile (para producción Railway)
+# -------------------------------
+# web: gunicorn app:app
