@@ -1,51 +1,37 @@
 from flask import Flask, request, jsonify
 from pymongo import MongoClient
 from bson.objectid import ObjectId
+import os
 import random
 from sklearn.linear_model import LinearRegression
-import os
 
 app = Flask(__name__)
 
-# ============================================
-# CONFIGURACIÓN MONGODB RAILWAY (SOLO MONGO_URL)
-# ============================================
+# ======================================
+# 🔥 CONEXIÓN A MONGO RAILWAY (FINAL)
+# ======================================
+mongo_url = os.getenv("MONGO_URL")
 
-MONGO_URI = os.getenv("MONGO_URL")
-PORT = int(os.getenv("PORT", 8000))
-
-if not MONGO_URI:
-    raise ValueError("❌ ERROR: Debes definir MONGO_URL en Railway")
+if not mongo_url:
+    raise Exception("❌ ERROR: No existe la variable MONGO_URL en Railway")
 
 try:
-    client = MongoClient(
-        MONGO_URI,
-        serverSelectionTimeoutMS=5000,
-        connectTimeoutMS=5000
-    )
-
-    # Probar conexión
-    client.server_info()
-    print("✅ Conectado correctamente a MongoDB de Railway")
-
-    # detectar nombre BD desde la URL
-    # mongodb+srv://.../production?retryWrites=true
-    db_name = MONGO_URI.split("/")[-1].split("?")[0]
-    db = client[db_name]
+    client = MongoClient(mongo_url)
+    db = client.get_default_database()  # Railway asigna la DB automáticamente
 
     users_col = db["users"]
     user_events_col = db["user_events"]
 
+    print("✅ Conectado exitosamente a MongoDB Railway")
+
 except Exception as e:
-    print(f"❌ ERROR CRÍTICO MongoDB: {e}")
+    print("❌ Error conectando a MongoDB:", e)
     db = None
-    users_col = None
-    user_events_col = None
 
 
-# ============================================
-# CONSTANTES
-# ============================================
+# ======================================
+# DATOS BASE
+# ======================================
 
 EVENT_IMPACT = {
     "fiesta": {"calorias": 600, "compensar_dias": 3, "tipo": "exceso"},
@@ -77,9 +63,9 @@ COMPENSATION_MEALS = {
 }
 
 
-# ============================================
-# MODELO ML
-# ============================================
+# ======================================
+# 🔥 MODELO ML
+# ======================================
 
 def train_model():
     if db is None:
@@ -109,9 +95,9 @@ def train_model():
         return None
 
 
-# ============================================
-# RUTA TEST
-# ============================================
+# ======================================
+# 🔥 ENDPOINT TEST
+# ======================================
 
 @app.route("/")
 def home():
@@ -121,9 +107,18 @@ def home():
     })
 
 
-# ============================================
-# ADAPTAR PLAN
-# ============================================
+@app.route("/test-db")
+def test_db():
+    try:
+        data = list(users_col.find({}, {"_id": 0}))
+        return jsonify({"ok": True, "users": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ======================================
+# 🔥 ENDPOINT PRINCIPAL /adapt
+# ======================================
 
 @app.route("/adapt", methods=["POST"])
 def adapt_plan():
@@ -139,20 +134,19 @@ def adapt_plan():
         plan = data.get("plan")
 
         if not user_id or not plan:
-            return jsonify({"error": "Faltan campos obligatorios"}), 400
+            return jsonify({"error": "Datos incompletos"}), 400
 
         if event_type not in EVENT_IMPACT:
-            return jsonify({"error": f"Evento '{event_type}' no reconocido"}), 400
+            return jsonify({"error": "Evento inválido"}), 400
 
         try:
             ObjectId(user_id)
         except:
-            return jsonify({"error": "ID de usuario inválido"}), 400
+            return jsonify({"error": "ID inválido"}), 400
 
         event = EVENT_IMPACT[event_type]
         calorias = event["calorias"]
 
-        # ML o valores base
         model = train_model()
         compensar = int(round(model.predict([[calorias]])[0])) if model else event["compensar_dias"]
 
@@ -174,17 +168,15 @@ def adapt_plan():
 
             updated[d] = random.choices(meals, k=3)
 
-        # Guardar en BD
-        if db:
-            user_events_col.insert_one({
-                "userId": user_id,
-                "event": event_type,
-                "day": day,
-                "adjusted_days": compensar
-            })
+        user_events_col.insert_one({
+            "userId": user_id,
+            "event": event_type,
+            "day": day,
+            "adjusted_days": compensar
+        })
 
         return jsonify({
-            "message": f"Plan ajustado por evento {event_type}",
+            "message": f"Evento procesado ({event_type})",
             "updatedPlan": updated
         })
 
@@ -193,10 +185,11 @@ def adapt_plan():
         return jsonify({"error": str(e)}), 500
 
 
-# ============================================
-# INICIO APP
-# ============================================
+# ======================================
+# 🔥 RUN
+# ======================================
 
 if __name__ == "__main__":
-    print(f"🚀 IA Flask lista en puerto {PORT}")
-    app.run(host="0.0.0.0", port=PORT)
+    port = int(os.getenv("PORT", 8000))
+    print(f"🚀 Servidor listo en puerto {port}")
+    app.run(host="0.0.0.0", port=port)
