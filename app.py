@@ -8,7 +8,7 @@ from sklearn.linear_model import LinearRegression
 app = Flask(__name__)
 
 # ======================================
-# 🔥 CONEXIÓN A MONGO RAILWAY (FINAL REAL)
+# CONEXIÓN A MONGO RAILWAY (FINAL REAL)
 # ======================================
 mongo_url = os.getenv("MONGO_URL")
 db_name = os.getenv("MONGO_DB", "test")  
@@ -18,7 +18,7 @@ if not mongo_url:
 
 try:
     client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
-    db = client[test]  
+    db = client[db_name]  
 
     # Test de conexión
     client.server_info()
