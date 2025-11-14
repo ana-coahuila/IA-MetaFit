@@ -8,20 +8,18 @@ from sklearn.linear_model import LinearRegression
 app = Flask(__name__)
 
 # ======================================
-# CONEXIÓN A MONGO RAILWAY (FINAL REAL)
+# CONEXIÓN A MONGO RAILWAY
 # ======================================
 mongo_url = os.getenv("MONGO_URL")
-db_name = os.getenv("MONGO_DB", "test")  
+db_name = os.getenv("MONGO_DB", "test")
 
 if not mongo_url:
     raise Exception("❌ ERROR: No existe la variable MONGO_URL en Railway")
 
 try:
     client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
-    db = client[db_name]  
-
-    # Test de conexión
-    client.server_info()
+    db = client[db_name]
+    client.server_info()  # Test conexión
 
     users_col = db["users"]
     user_events_col = db["user_events"]
@@ -108,7 +106,7 @@ def train_model():
 @app.route("/")
 def home():
     return jsonify({
-        "message": "IA Flask funcionando",
+        "message": "IA Flask funcionando correctamente",
         "mongo_connected": db is not None
     })
 
@@ -125,7 +123,7 @@ def adapt_plan():
         day = data.get("day", "").lower()
         plan = data.get("plan")
 
-        if not user_id or not plan:
+        if not user_id or not plan or event_type not in EVENT_IMPACT:
             return jsonify({"error": "Datos incompletos"}), 400
 
         event = EVENT_IMPACT[event_type]
@@ -134,9 +132,13 @@ def adapt_plan():
         model = train_model()
         compensar = int(round(model.predict([[calorias]])[0])) if model else event["compensar_dias"]
 
-        week_days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
-        idx = week_days.index(day)
+        week_days = ["monday", "tuesday", "wednesday", "thursday",
+                     "friday", "saturday", "sunday"]
 
+        if day not in week_days:
+            return jsonify({"error": "Día inválido"}), 400
+
+        idx = week_days.index(day)
         updated = plan
 
         for i in range(1, compensar + 1):
@@ -160,12 +162,12 @@ def adapt_plan():
         })
 
         return jsonify({
-            "message": "Plan ajustado",
+            "message": "Plan ajustado con éxito",
             "updatedPlan": updated
         })
 
     except Exception as e:
-        print("❌ ERROR adapt:", e)
+        print("❌ ERROR /adapt:", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -174,6 +176,6 @@ def adapt_plan():
 # ======================================
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    print(f"🚀 Servidor listo en puerto {port}")
+    port = int(os.getenv("PORT", "8000"))  # Railway asigna PORT automático
+    print(f"🚀 Servidor corriendo en puerto {port}")
     app.run(host="0.0.0.0", port=port)
