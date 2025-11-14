@@ -4,24 +4,16 @@ from bson.objectid import ObjectId
 import random
 import numpy as np
 from sklearn.linear_model import LinearRegression
-import os
 
 app = Flask(__name__)
 
-# ==========================================================
-#   CONEXIÓN A MONGO — LISTO PARA RAILWAY 🟢
-# ==========================================================
-
-# Railway te da esta variable automáticamente
+# Conexión a MongoDB
 MONGO_URI = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 
 client = MongoClient(MONGO_URI)
 db = client["fitness_db"]
 
-# ==========================================================
-#   CONFIGURACIONES Y DATOS
-# ==========================================================
-
+# Impacto de eventos
 EVENT_IMPACT = {
     "fiesta": {"calorias": 600, "compensar_dias": 3, "tipo": "exceso"},
     "viaje": {"calorias": 400, "compensar_dias": 2, "tipo": "exceso"},
@@ -30,6 +22,7 @@ EVENT_IMPACT = {
     "día_libre": {"calorias": 300, "compensar_dias": 2, "tipo": "exceso"},
 }
 
+# Comidas de compensación
 COMPENSATION_MEALS = {
     "ligero": [
         {"name": "ensalada de pollo", "calories": 150},
@@ -51,41 +44,29 @@ COMPENSATION_MEALS = {
     ]
 }
 
-# ==========================================================
-#   ENTRENAMIENTO DE MODELO
-# ==========================================================
-
+# Entrenar modelo simple
 def train_model():
     events = list(db.user_events.find({}))
     if len(events) < 3:
         return None
-
     X, y = [], []
-
-    for e in events:
+    for e in events: 
         tipo_evento = e.get("event", "")
         if tipo_evento in EVENT_IMPACT:
             calorias = EVENT_IMPACT[tipo_evento]["calorias"]
             compensar = e.get("adjusted_days", EVENT_IMPACT[tipo_evento]["compensar_dias"])
             X.append([calorias])
             y.append(compensar)
-
     if len(X) < 3:
         return None
-
     model = LinearRegression()
     model.fit(X, y)
     return model
-
-# ==========================================================
-#   ENDPOINT PRINCIPAL
-# ==========================================================
 
 @app.route('/adapt', methods=['POST'])
 @app.route('/api/plans/adapt', methods=['POST'])
 def adapt_plan():
     data = request.get_json()
-
     if not data:
         return jsonify({"error": "Falta el cuerpo JSON"}), 400
 
@@ -96,35 +77,36 @@ def adapt_plan():
 
     if not user_id or not plan:
         return jsonify({"error": "Faltan campos obligatorios (userId, plan)"}), 400
-
     if event_type not in EVENT_IMPACT:
         return jsonify({"error": f"Evento '{event_type}' no reconocido"}), 400
 
-    # Validar usuario
+    # Buscar usuario
     try:
         user_data = db.users.find_one({"_id": ObjectId(user_id)})
     except:
         return jsonify({"error": f"ID de usuario '{user_id}' no válido"}), 400
 
     if not user_data:
-        return jsonify({"error": "Usuario no encontrado"}), 404
+        return jsonify({"error": f"Usuario con ID '{user_id}' no encontrado"}), 404
 
     event = EVENT_IMPACT[event_type]
     tipo = event["tipo"]
     calorias_evento = event["calorias"]
 
+    # Predecir días a compensar
     model = train_model()
     compensar_dias = int(round(model.predict([[calorias_evento]])[0])) if model else event["compensar_dias"]
 
     week_days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
     event_index = week_days.index(day) if day in week_days else 0
 
+    # Actualizar solo los días necesarios
     updated_plan = plan.copy()
-
     for i in range(1, compensar_dias + 1):
         idx = (event_index + i) % len(week_days)
         day_to_adjust = week_days[idx]
 
+        # Mantener _id original si existe
         if day_to_adjust in updated_plan:
             original_meals = updated_plan[day_to_adjust]
             new_meals = random.choices(
@@ -136,9 +118,9 @@ def adapt_plan():
             for j in range(3):
                 original_meals[j]["name"] = new_meals[j]["name"]
                 original_meals[j]["calories"] = new_meals[j]["calories"]
-
             updated_plan[day_to_adjust] = original_meals
 
+    # Guardar evento
     db.user_events.insert_one({
         "userId": user_id,
         "event": event_type,
@@ -147,14 +129,10 @@ def adapt_plan():
     })
 
     return jsonify({
-        "message": f"Plan ajustado por evento '{event_type}' (ML: {compensar_dias} días)",
+        "message": f"Plan ajustado automáticamente por evento '{event_type}' (predicción ML: {compensar_dias} días)",
         "updatedPlan": updated_plan
     })
 
-# ==========================================================
-#   MODO PRODUCCIÓN RAILWAY 🟢
-# ==========================================================
-
-if __name__ == "__main__":
-    print("🚀 Conectado a MongoDB correctamente")
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+if __name__ == '__main__':
+    print("✅ Conectado a MongoDB")
+    app.run(host='0.0.0.0', port=8000, debug=True)
