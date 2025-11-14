@@ -134,17 +134,25 @@ def adapt_plan():
         event_index = week_days.index(day) if day in week_days else 0
 
         updated_plan = plan.copy()
+        
         for i in range(1, compensar_dias + 1):
             idx = (event_index + i) % len(week_days)
             day_to_adjust = week_days[idx]
             if day_to_adjust in updated_plan:
-                new_meals = random.choices(
-                    COMPENSATION_MEALS["ligero"] if "exceso" in tipo else
-                    COMPENSATION_MEALS["proteico"] if "deficit" in tipo else
-                    COMPENSATION_MEALS["detox"],
-                    k=3
-                )
-                updated_plan[day_to_adjust] = new_meals
+                # Convertir las comidas complejas a formato simple
+                current_meals = updated_plan[day_to_adjust]
+                if current_meals and isinstance(current_meals[0], dict) and 'name' in current_meals[0]:
+                    # Ya está en formato correcto, usar directamente
+                    pass
+                else:
+                    # Si no está en formato correcto, usar comidas de compensación
+                    new_meals = random.choices(
+                        COMPENSATION_MEALS["ligero"] if "exceso" in tipo else
+                        COMPENSATION_MEALS["proteico"] if "deficit" in tipo else
+                        COMPENSATION_MEALS["detox"],
+                        k=3
+                    )
+                    updated_plan[day_to_adjust] = new_meals
 
         # Registrar evento si hay conexión a BD
         if db is not None:
@@ -161,8 +169,10 @@ def adapt_plan():
         })
 
     except Exception as e:
-        print(f"❌ Error en adapt_plan: {e}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        print(f"❌ Error en adapt_plan: {str(e)}")
+        import traceback
+        print(f"🔍 Traceback completo: {traceback.format_exc()}")
+        return jsonify({"error": f"Error interno del servidor: {str(e)}"}), 500
 
 if __name__ == "__main__":
     print(f"🚀 Servidor iniciado en puerto {PORT}")
