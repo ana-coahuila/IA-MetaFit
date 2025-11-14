@@ -2,33 +2,44 @@ from flask import Flask, request, jsonify
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import random
-import numpy as np
 from sklearn.linear_model import LinearRegression
 import os
 
 app = Flask(__name__)
 
-# Configuración MongoDB - EXACTA A TU OTRO CÓDIGO
-MONGO_URI = os.environ.get("MONGO_URL")
-MONGO_DB = os.environ.get("MONGO_DB", "fitness_db")
-PORT = int(os.environ.get("PORT", 8000))
+# ============================================
+# 🔥 CONFIGURACIÓN MONGODB RAILWAY
+# ============================================
+
+MONGO_URI = os.getenv("MONGO_URL")
+MONGO_DB = os.getenv("MONGO_DB", "production")
+PORT = int(os.getenv("PORT", 8000))
 
 if not MONGO_URI:
-    raise ValueError("❌ Debes definir la variable MONGO_URL en tu entorno")
+    raise ValueError("❌ ERROR: Debes definir MONGO_URL en Railway")
 
-# ------------------------------
-# Conexión a MongoDB
-# ------------------------------
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     db = client[MONGO_DB]
+
+    # forzar prueba de conexión
+    client.server_info()
+
     users_col = db["users"]
     user_events_col = db["user_events"]
-    print("✅ MongoDB conectado")
+
+    print("✅ Conectado correctamente a MongoDB de Railway")
+
 except Exception as e:
-    print(f"❌ Error MongoDB: {e}")
-    client = None
+    print(f"❌ ERROR CRÍTICO MongoDB: {e}")
     db = None
+    users_col = None
+    user_events_col = None
+
+
+# ============================================
+# CONSTANTES
+# ============================================
 
 EVENT_IMPACT = {
     "fiesta": {"calorias": 600, "compensar_dias": 3, "tipo": "exceso"},
@@ -59,52 +70,62 @@ COMPENSATION_MEALS = {
     ]
 }
 
+
+# ============================================
+# MODELO ML
+# ============================================
+
 def train_model():
     if db is None:
         return None
-        
+
     try:
         events = list(user_events_col.find({}))
         if len(events) < 3:
             return None
-        
+
         X, y = [], []
         for e in events:
-            tipo_evento = e.get("event", "")
-            if tipo_evento in EVENT_IMPACT:
-                calorias = EVENT_IMPACT[tipo_evento]["calorias"]
-                compensar = e.get("adjusted_days", EVENT_IMPACT[tipo_evento]["compensar_dias"])
-                X.append([calorias])
-                y.append(compensar)
-        
+            tipo = e.get("event")
+            if tipo in EVENT_IMPACT:
+                X.append([EVENT_IMPACT[tipo]["calorias"]])
+                y.append(e.get("adjusted_days", EVENT_IMPACT[tipo]["compensar_dias"]))
+
         if len(X) < 3:
             return None
-        
+
         model = LinearRegression()
         model.fit(X, y)
         return model
+
     except Exception as e:
-        print(f"❌ Error entrenando modelo: {e}")
+        print("❌ Error entrenando modelo:", e)
         return None
 
-@app.route('/')
+
+# ============================================
+# RUTA TEST
+# ============================================
+
+@app.route("/")
 def home():
     return jsonify({
-        "message": "Fitness API funcionando en Railway!",
-        "status": "active",
+        "message": "IA Flask funcionando en Railway",
         "mongo_connected": db is not None
     })
 
-@app.route('/health')
-def health():
-    return jsonify({"status": "healthy", "mongo_connected": db is not None})
 
-@app.route('/adapt', methods=['POST'])
+# ============================================
+# ADAPTAR PLAN
+# ============================================
+
+@app.route("/adapt", methods=["POST"])
 def adapt_plan():
     try:
         data = request.get_json()
+
         if not data:
-            return jsonify({"error": "Falta el cuerpo JSON"}), 400
+            return jsonify({"error": "JSON inválido"}), 400
 
         user_id = data.get("userId")
         event_type = data.get("eventType", "").lower()
@@ -112,68 +133,64 @@ def adapt_plan():
         plan = data.get("plan")
 
         if not user_id or not plan:
-            return jsonify({"error": "Faltan campos obligatorios: userId y plan"}), 400
-        
+            return jsonify({"error": "Faltan campos obligatorios"}), 400
+
         if event_type not in EVENT_IMPACT:
             return jsonify({"error": f"Evento '{event_type}' no reconocido"}), 400
 
-        # Solo validar formato del ID, no buscar en base de datos
         try:
             ObjectId(user_id)
         except:
-            return jsonify({"error": f"ID de usuario '{user_id}' no válido"}), 400
+            return jsonify({"error": "ID de usuario inválido"}), 400
 
         event = EVENT_IMPACT[event_type]
-        tipo = event["tipo"]
-        calorias_evento = event["calorias"]
+        calorias = event["calorias"]
 
         model = train_model()
-        compensar_dias = int(round(model.predict([[calorias_evento]])[0])) if model else event["compensar_dias"]
+        compensar = int(round(model.predict([[calorias]])[0])) if model else event["compensar_dias"]
 
         week_days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
-        event_index = week_days.index(day) if day in week_days else 0
+        idx = week_days.index(day) if day in week_days else 0
 
-        updated_plan = plan.copy()
-        
-        for i in range(1, compensar_dias + 1):
-            idx = (event_index + i) % len(week_days)
-            day_to_adjust = week_days[idx]
-            if day_to_adjust in updated_plan:
-                # Convertir las comidas complejas a formato simple
-                current_meals = updated_plan[day_to_adjust]
-                if current_meals and isinstance(current_meals[0], dict) and 'name' in current_meals[0]:
-                    # Ya está en formato correcto, usar directamente
-                    pass
-                else:
-                    # Si no está en formato correcto, usar comidas de compensación
-                    new_meals = random.choices(
-                        COMPENSATION_MEALS["ligero"] if "exceso" in tipo else
-                        COMPENSATION_MEALS["proteico"] if "deficit" in tipo else
-                        COMPENSATION_MEALS["detox"],
-                        k=3
-                    )
-                    updated_plan[day_to_adjust] = new_meals
+        updated = plan.copy()
 
-        # Registrar evento si hay conexión a BD
-        if db is not None:
+        # generar nuevas comidas
+        for i in range(1, compensar + 1):
+            d = week_days[(idx + i) % 7]
+
+            tipo = event["tipo"]
+            if "exceso" in tipo:
+                meals = COMPENSATION_MEALS["ligero"]
+            elif "deficit" in tipo:
+                meals = COMPENSATION_MEALS["proteico"]
+            else:
+                meals = COMPENSATION_MEALS["detox"]
+
+            updated[d] = random.choices(meals, k=3)
+
+        # guardar en bd
+        if db:
             user_events_col.insert_one({
                 "userId": user_id,
                 "event": event_type,
                 "day": day,
-                "adjusted_days": compensar_dias
+                "adjusted_days": compensar
             })
 
         return jsonify({
-            "message": f"Plan ajustado automáticamente por evento '{event_type}' (predicción ML: {compensar_dias} días)",
-            "updatedPlan": updated_plan
+            "message": f"Plan ajustado por evento {event_type}",
+            "updatedPlan": updated
         })
 
     except Exception as e:
-        print(f"❌ Error en adapt_plan: {str(e)}")
-        import traceback
-        print(f"🔍 Traceback completo: {traceback.format_exc()}")
-        return jsonify({"error": f"Error interno del servidor: {str(e)}"}), 500
+        print("❌ ERROR adapt:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================
+# INICIO APP
+# ============================================
 
 if __name__ == "__main__":
-    print(f"🚀 Servidor iniciado en puerto {PORT}")
-    app.run(host="0.0.0.0", port=PORT, debug=False)
+    print(f"🚀 IA Flask lista en puerto {PORT}")
+    app.run(host="0.0.0.0", port=PORT)
