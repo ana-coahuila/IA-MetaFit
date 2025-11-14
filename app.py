@@ -8,27 +8,33 @@ import os
 app = Flask(__name__)
 
 # ============================================
-# 🔥 CONFIGURACIÓN MONGODB RAILWAY
+# CONFIGURACIÓN MONGODB RAILWAY (SOLO MONGO_URL)
 # ============================================
 
 MONGO_URI = os.getenv("MONGO_URL")
-MONGO_DB = os.getenv("MONGO_DB", "production")
 PORT = int(os.getenv("PORT", 8000))
 
 if not MONGO_URI:
     raise ValueError("❌ ERROR: Debes definir MONGO_URL en Railway")
 
 try:
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    db = client[MONGO_DB]
+    client = MongoClient(
+        MONGO_URI,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=5000
+    )
 
-    # forzar prueba de conexión
+    # Probar conexión
     client.server_info()
+    print("✅ Conectado correctamente a MongoDB de Railway")
+
+    # detectar nombre BD desde la URL
+    # mongodb+srv://.../production?retryWrites=true
+    db_name = MONGO_URI.split("/")[-1].split("?")[0]
+    db = client[db_name]
 
     users_col = db["users"]
     user_events_col = db["user_events"]
-
-    print("✅ Conectado correctamente a MongoDB de Railway")
 
 except Exception as e:
     print(f"❌ ERROR CRÍTICO MongoDB: {e}")
@@ -146,6 +152,7 @@ def adapt_plan():
         event = EVENT_IMPACT[event_type]
         calorias = event["calorias"]
 
+        # ML o valores base
         model = train_model()
         compensar = int(round(model.predict([[calorias]])[0])) if model else event["compensar_dias"]
 
@@ -154,7 +161,6 @@ def adapt_plan():
 
         updated = plan.copy()
 
-        # generar nuevas comidas
         for i in range(1, compensar + 1):
             d = week_days[(idx + i) % 7]
 
@@ -168,7 +174,7 @@ def adapt_plan():
 
             updated[d] = random.choices(meals, k=3)
 
-        # guardar en bd
+        # Guardar en BD
         if db:
             user_events_col.insert_one({
                 "userId": user_id,
