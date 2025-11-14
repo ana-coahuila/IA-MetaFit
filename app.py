@@ -8,16 +8,20 @@ from sklearn.linear_model import LinearRegression
 app = Flask(__name__)
 
 # ======================================
-# 🔥 CONEXIÓN A MONGO RAILWAY (FINAL)
+# 🔥 CONEXIÓN A MONGO RAILWAY (FINAL REAL)
 # ======================================
 mongo_url = os.getenv("MONGO_URL")
+db_name = os.getenv("MONGO_DB", "test")  
 
 if not mongo_url:
     raise Exception("❌ ERROR: No existe la variable MONGO_URL en Railway")
 
 try:
-    client = MongoClient(mongo_url)
-    db = client.get_default_database()  # Railway asigna la DB automáticamente
+    client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
+    db = client[test]  
+
+    # Test de conexión
+    client.server_info()
 
     users_col = db["users"]
     user_events_col = db["user_events"]
@@ -27,6 +31,8 @@ try:
 except Exception as e:
     print("❌ Error conectando a MongoDB:", e)
     db = None
+    users_col = None
+    user_events_col = None
 
 
 # ======================================
@@ -96,38 +102,24 @@ def train_model():
 
 
 # ======================================
-# 🔥 ENDPOINT TEST
+# ROUTES
 # ======================================
 
 @app.route("/")
 def home():
     return jsonify({
-        "message": "IA Flask funcionando en Railway",
+        "message": "IA Flask funcionando",
         "mongo_connected": db is not None
     })
 
 
-@app.route("/test-db")
-def test_db():
-    try:
-        data = list(users_col.find({}, {"_id": 0}))
-        return jsonify({"ok": True, "users": data})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-# ======================================
-# 🔥 ENDPOINT PRINCIPAL /adapt
-# ======================================
-
 @app.route("/adapt", methods=["POST"])
 def adapt_plan():
     try:
+        if db is None:
+            return jsonify({"error": "DB no conectada"}), 500
+
         data = request.get_json()
-
-        if not data:
-            return jsonify({"error": "JSON inválido"}), 400
-
         user_id = data.get("userId")
         event_type = data.get("eventType", "").lower()
         day = data.get("day", "").lower()
@@ -136,14 +128,6 @@ def adapt_plan():
         if not user_id or not plan:
             return jsonify({"error": "Datos incompletos"}), 400
 
-        if event_type not in EVENT_IMPACT:
-            return jsonify({"error": "Evento inválido"}), 400
-
-        try:
-            ObjectId(user_id)
-        except:
-            return jsonify({"error": "ID inválido"}), 400
-
         event = EVENT_IMPACT[event_type]
         calorias = event["calorias"]
 
@@ -151,9 +135,9 @@ def adapt_plan():
         compensar = int(round(model.predict([[calorias]])[0])) if model else event["compensar_dias"]
 
         week_days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
-        idx = week_days.index(day) if day in week_days else 0
+        idx = week_days.index(day)
 
-        updated = plan.copy()
+        updated = plan
 
         for i in range(1, compensar + 1):
             d = week_days[(idx + i) % 7]
@@ -176,7 +160,7 @@ def adapt_plan():
         })
 
         return jsonify({
-            "message": f"Evento procesado ({event_type})",
+            "message": "Plan ajustado",
             "updatedPlan": updated
         })
 
@@ -186,7 +170,7 @@ def adapt_plan():
 
 
 # ======================================
-# 🔥 RUN
+# RUN
 # ======================================
 
 if __name__ == "__main__":
