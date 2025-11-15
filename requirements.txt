@@ -2,3 +2,4 @@ flask
 pymongo
 scikit-learn
 numpy
+flask-cors
